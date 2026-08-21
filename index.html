@@ -7,13 +7,13 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>Free Fire Items Library</title>
-  <link rel="icon" type="image/png" href="icon_web.png?v=3.0">
-  <link rel="apple-touch-icon" href="icon_web.png?v=3.0">
-  <link rel="manifest" href="manifest.json?v=3.0">
+  <link rel="icon" type="image/png" href="icon_web.png?v=3.1">
+  <link rel="apple-touch-icon" href="icon_web.png?v=3.1">
+  <link rel="manifest" href="manifest.json?v=3.1">
   <!-- Preload dữ liệu quan trọng nhất ngay khi browser parse HTML -->
-  <link rel="preload" href="ItemsData_en.json?v=3.0.0" as="fetch" crossorigin="anonymous">
-  <link rel="preload" href="updated_icons.json?v=3.0.0" as="fetch" crossorigin="anonymous">
-  <link rel="preload" href="CollectionBanner.json?v=3.0.0" as="fetch" crossorigin="anonymous">
+  <link rel="preload" href="ItemsData_en.json?v=3.1.0" as="fetch" crossorigin="anonymous">
+  <link rel="preload" href="updated_icons.json?v=3.1.0" as="fetch" crossorigin="anonymous">
+  <link rel="preload" href="CollectionBanner.json?v=3.1.0" as="fetch" crossorigin="anonymous">
   <link href="https://fonts.googleapis.com/css2?family=Oxanium:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
     :root {
@@ -860,7 +860,7 @@
 </div>
 
 <script>
-  const APP_VERSION = "3.0.0";
+  const APP_VERSION = "3.1.0";
   if (localStorage.getItem('appVersion') !== APP_VERSION) {
     localStorage.setItem('appVersion', APP_VERSION);
     if ('caches' in window) caches.keys().then(n => n.forEach(k => caches.delete(k)));
