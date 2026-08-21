@@ -33,13 +33,16 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '22'
 
       - name: Chạy fetch icons
         run: node fetch-icons.js
+
+      - name: Dịch dữ liệu sang VN & ZH tự động
+        run: node translate-data.js
 
       - name: Commit và push nếu có thay đổi
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "Auto-synced data & icons [12h]"
-          file_pattern: 'ItemsData_en.json CollectionBanner.json ignore_list.json icons/ updated_icons.json'
+          file_pattern: 'ItemsData_en.json ItemsData_vn.json ItemsData_zh.json CollectionBanner.json ignore_list.json icons/ updated_icons.json'
