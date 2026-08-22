@@ -23,10 +23,14 @@ Thư viện web toàn diện để khám phá và duyệt tất cả vật phẩ
 ```
 ├── index.html              # Giao diện chính
 ├── ItemsData_en.json       # Dữ liệu vật phẩm (tiếng Anh)
+├── ItemsData_vn.json       # Dữ liệu vật phẩm (tiếng Việt)
+├── ItemsData_zh.json       # Dữ liệu vật phẩm (tiếng Trung)
 ├── CollectionBanner.json   # Dữ liệu banner bộ sưu tập
 ├── updated_icons.json      # Danh sách icon đã cập nhật (_2.png)
 ├── ignore_list.json        # Vật phẩm loại trừ khỏi fetch
 ├── fetch-icons.js          # Script tải icon tự động
+├── translate-data.js       # Script dịch tự động VN/ZH
+├── vercel.json             # Cấu hình routing sạch cho Vercel
 ├── icons/                  # Thư mục chứa toàn bộ icon (.png)
 ├── background/             # Ảnh nền theo độ hiếm
 └── .github/workflows/
@@ -49,6 +53,20 @@ Kích hoạt khi `ItemsData_en.json`, `CollectionBanner.json` hoặc `ignore_lis
 - Tải icon còn thiếu từ API
 - Cập nhật `updated_icons.json`
 - 150 worker song song để tối đa tốc độ
+
+---
+
+## 🔗 URL Routing
+
+Web hỗ trợ URL sạch, thân thiện SEO:
+
+- `https://free-fire-item-library.vercel.app/en/` — Tiếng Anh
+- `https://free-fire-item-library.vercel.app/vn/` — Tiếng Việt
+- `https://free-fire-item-library.vercel.app/zh/` — Tiếng Trung
+- `https://free-fire-item-library.vercel.app/en/101000001/` — Chi tiết item
+- `https://free-fire-item-library.vercel.app/vn/101000001/?type=AVATAR` — Item có filter
+
+> Cú pháp cũ `?lang=vi&item=101` vẫn hoạt động để tương thích ngược.
 
 ---
 

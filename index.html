@@ -1056,7 +1056,8 @@
   let _modalPushedHistory = false;
 
   function parseRoute(){
-    const path = window.location.pathname.replace(/\/+$/,'');
+    const hash = window.location.hash.replace(/^#/,'');
+    const path = hash.split('?')[0].replace(/\/+$/,'');
     const parts = path.split('/').filter(Boolean);
     const langMap = { en:'en', vn:'vi', vi:'vi', zh:'zh', 'zh-TW':'zh' };
     if(parts.length >= 2 && langMap[parts[0]] && /^\d+$/.test(parts[1])){
@@ -1074,7 +1075,7 @@
 
   function buildUrl(itemId, search, type, rare, tag){
     const base = window.location.origin + window.location.pathname.replace('index.html','');
-    let url = base.replace(/\/$/,'') + '/' + (lang==='en'?'en':lang==='vi'?'vn':'zh') + '/';
+    let url = base.replace(/\/$/,'') + '/#/' + (lang==='en'?'en':lang==='vi'?'vn':'zh') + '/';
     if(itemId) url += itemId + '/';
     const usp = new URLSearchParams();
     if(search) usp.set('search',search);

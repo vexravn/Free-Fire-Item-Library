@@ -24,9 +24,9 @@ const EN_FILE   = path.join(__dirname, 'ItemsData_en.json');
 const VN_FILE   = path.join(__dirname, 'ItemsData_vn.json');
 const ZH_FILE   = path.join(__dirname, 'ItemsData_zh.json');
 
-const CONCURRENCY = 8;
+const CONCURRENCY = 16;
 const RETRY_MAX   = 4;
-const RETRY_BASE  = 600;
+const RETRY_BASE  = 400;
 
 const GLOSSARY_EN = {
   vi: {
@@ -312,8 +312,8 @@ async function main() {
 
   const sec = ((Date.now() - t0) / 1000).toFixed(1);
   console.log(`\n✅ Hoàn thành trong ${sec}s`);
-  console.log(`   VN: ${vnStats.translated} dịch, ${vnStats.unchchanged} giữ nguyên`);
-  console.log(`   ZH: ${zhStats.translated} dịch, ${zhStats.unchchanged} giữ nguyên`);
+  console.log(`   VN: ${vnStats.translated} dịch, ${vnStats.unchanged} giữ nguyên`);
+  console.log(`   ZH: ${zhStats.translated} dịch, ${zhStats.unchanged} giữ nguyên`);
 }
 
 main().catch(e => { console.error('❌', e.message); process.exit(1); });
