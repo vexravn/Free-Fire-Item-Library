@@ -27,9 +27,68 @@ const ZH_FILE   = path.join(__dirname, 'ItemsData_zh.json');
 const CONCURRENCY = 8;
 const RETRY_MAX   = 4;
 const RETRY_BASE  = 600;
+
+const GLOSSARY_EN = {
+  vi: {
+    'Top': '__TOP__',
+    'Bottom': '__BOTTOM__',
+    'Shoes': '__SHOES__',
+    'Head': '__HEAD__',
+    'Facepaint': '__FACEPAINT__',
+    'Mask': '__MASK__',
+  },
+  'zh-TW': {
+    'Top': '__TOP__',
+    'Bottom': '__BOTTOM__',
+    'Shoes': '__SHOES__',
+    'Head': '__HEAD__',
+    'Facepaint': '__FACEPAINT__',
+    'Mask': '__MASK__',
+  }
+};
+
+const GLOSSARY_TRANSLATIONS = {
+  vi: {
+    '__TOP__': 'Áo',
+    '__BOTTOM__': 'Quần',
+    '__SHOES__': 'Giày',
+    '__HEAD__': 'Tóc',
+    '__FACEPAINT__': 'Vẽ Mặt',
+    '__MASK__': 'Mặt Nạ',
+  },
+  'zh-TW': {
+    '__TOP__': '上衣',
+    '__BOTTOM__': '裤子',
+    '__SHOES__': '鞋子',
+    '__HEAD__': '頭髮',
+    '__FACEPAINT__': '面部彩繪',
+    '__MASK__': '面具',
+  }
+};
 // ────────────────────────────────────────────────
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+function applyGlossary(text, lang) {
+  const glossary = GLOSSARY_EN[lang];
+  if (!glossary) return text;
+  let result = text;
+  for (const [en, placeholder] of Object.entries(glossary)) {
+    const regex = new RegExp('\\b' + en.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'g');
+    result = result.replace(regex, placeholder);
+  }
+  return result;
+}
+
+function restoreGlossary(text, lang) {
+  const translations = GLOSSARY_TRANSLATIONS[lang];
+  if (!translations) return text;
+  let result = text;
+  for (const [placeholder, translation] of Object.entries(translations)) {
+    result = result.split(placeholder).join(translation);
+  }
+  return result;
+}
 
 // ── Google Translate (unofficial, miễn phí) ─────
 function translateText(text, targetLang) {
@@ -132,8 +191,8 @@ async function processLanguage(enData, existingData, targetLang, outputFile, lab
   const tasks = toTranslate.map(({ en, ex, needName, needDesc }) => async () => {
     const result = { Name: ex?.Name ?? '', Desc: ex?.Desc ?? '' };
 
-    if (needName)  result.Name = await translate(en.Name, targetLang);
-    if (needDesc)  result.Desc = await translate(en.Desc, targetLang);
+    if (needName)  result.Name = restoreGlossary(await translate(applyGlossary(en.Name, targetLang), targetLang), targetLang);
+    if (needDesc)  result.Desc = restoreGlossary(await translate(applyGlossary(en.Desc, targetLang), targetLang), targetLang);
 
     translated.set(en.Id, result);
     done++;
