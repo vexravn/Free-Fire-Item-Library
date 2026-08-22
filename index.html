@@ -1052,9 +1052,41 @@
   ];
 
   let lang = 'en';
-  const usp = new URLSearchParams(window.location.search);
-  if (usp.get('lang') === 'vi') lang = 'vi';
-  else if (usp.get('lang') === 'zh') lang = 'zh';
+  let routeItemId = null;
+  let _modalPushedHistory = false;
+
+  function parseRoute(){
+    const path = window.location.pathname.replace(/\/+$/,'');
+    const parts = path.split('/').filter(Boolean);
+    const langMap = { en:'en', vn:'vi', vi:'vi', zh:'zh', 'zh-TW':'zh' };
+    if(parts.length >= 2 && langMap[parts[0]] && /^\d+$/.test(parts[1])){
+      lang = langMap[parts[0]];
+      routeItemId = parts[1];
+    } else if(parts.length === 1 && langMap[parts[0]]){
+      lang = langMap[parts[0]];
+    }
+    // backward compat: ?lang=vi
+    const usp = new URLSearchParams(window.location.search);
+    if(usp.get('lang')==='vi') lang='vi';
+    else if(usp.get('lang')==='zh') lang='zh';
+    if(usp.get('item')) routeItemId = usp.get('item');
+  }
+
+  function buildUrl(itemId, search, type, rare, tag){
+    const base = window.location.origin + window.location.pathname.replace('index.html','');
+    let url = base.replace(/\/$/,'') + '/' + (lang==='en'?'en':lang==='vi'?'vn':'zh') + '/';
+    if(itemId) url += itemId + '/';
+    const usp = new URLSearchParams();
+    if(search) usp.set('search',search);
+    if(type && type!=='all') usp.set('type',type);
+    if(rare && rare!=='all') usp.set('rare',rare);
+    if(tag && tag!=='all') usp.set('tag',tag);
+    const qs = usp.toString();
+    if(qs) url += '?' + qs;
+    return url;
+  }
+
+  parseRoute();
 
   let rawData=[], items=[], filtered=[], selected=new Set();
   let updatedSet=new Set(), banners=[], curBannerIcon=null;
@@ -1093,6 +1125,8 @@
     lang=l; document.body.setAttribute('dir','ltr');
     const cs=searchEl.value,ct=tagSel.value,cy=typeSel.value,cr=rareSel.value,cp=curPage;
     applyLangUI(); fetchData(cs,ct,cy,cr,cp); syncLangBtns();
+    const url = buildUrl(routeItemId, cs, ct, cy, cr);
+    history.pushState({lang,itemId:routeItemId},'',url);
   }
   function syncLangBtns(){
     const isEn=lang==='en', isVi=lang==='vi', isZh=lang==='zh';
@@ -1427,7 +1461,7 @@
     } else { openModal(gi); }
   }
 
-  function openModal(gi){
+  function openModal(gi, pushHistory=true){
     curItem = items[gi];
     const bnrObj = banners.find(b=>b.itemID===curItem.Id);
     const isBnr  = !!bnrObj;
@@ -1507,9 +1541,7 @@
 
     // Details
     const itemIdStr = curItem.Id.toString();
-    // URL dạng tenmien.com/?item=0123456
-    const base = window.location.origin + window.location.pathname.replace('index.html','');
-    const itemUrl = base + '?item=' + itemIdStr;
+    const itemUrl = buildUrl(itemIdStr, null, null, null, null);
     const idLink = $('modalIdLink');
     idLink.textContent = itemIdStr;
     idLink.href = itemUrl;
@@ -1522,11 +1554,37 @@
     $('btnCopyId').innerHTML = cpySVG;
     $('btnCopyIconId').innerHTML = cpySVG;
 
+    if(pushHistory){
+      routeItemId = curItem.Id.toString();
+      const url = buildUrl(routeItemId, searchEl.value.trim(), typeSel.value, rareSel.value, tagSel.value);
+      history.pushState({lang,itemId:routeItemId},'',url);
+      _modalPushedHistory = true;
+    }
+
     $('itemModal').classList.add('open');
   }
 
-  function closeModal(){ $('itemModal').classList.remove('open'); curItem=null; }
+  function closeModal(){ 
+    $('itemModal').classList.remove('open'); curItem=null; 
+    if(_modalPushedHistory && routeItemId){
+      history.back();
+      _modalPushedHistory = false;
+    }
+  }
   $('itemModal').addEventListener('click',e=>{ if(e.target===$('itemModal')) closeModal(); });
+
+  window.addEventListener('popstate',()=>{
+    parseRoute();
+    syncLangBtns();
+    if(routeItemId && window._itemsById){
+      const idx = window._itemsById.get(routeItemId);
+      if(idx !== undefined && idx !== -1){
+        openModal(idx, false);
+      }
+    } else if(curItem){
+      closeModal();
+    }
+  });
 
   function copyItemId(){
     if(!curItem) return;
@@ -1548,8 +1606,7 @@
   /* ---- SHARE ---- */
   $('btnShare').addEventListener('click',()=>{
     if(!curItem) return;
-    const base = window.location.origin + window.location.pathname.replace('index.html','');
-    const itemUrl = base + '?item=' + curItem.Id;
+    const itemUrl = buildUrl(curItem.Id, null, null, null, null);
     const name=(curItem.Name&&curItem.Name.trim())?curItem.Name:'Item';
     const txt=`${name}\n${tr[lang].shareItemText}`;
     if(navigator.share){ navigator.share({text:txt,url:itemUrl}); }
@@ -1557,30 +1614,29 @@
   });
 
   shareBtnEl.addEventListener('click',()=>{
-    const base=window.location.pathname.replace('index.html','');
-    const url=new URL(window.location.origin+base);
-    url.searchParams.set('lang',lang);
+    const url = buildUrl(routeItemId, searchEl.value.trim(), typeSel.value, rareSel.value, tagSel.value);
     const parts=[];
-    if(searchEl.value.trim()){url.searchParams.set('search',searchEl.value.trim());parts.push(searchEl.value.trim());}
-    if(typeSel.value!=='all'){url.searchParams.set('type',typeSel.value);parts.push(tr[lang].types[typeSel.value]||typeSel.value);}
-    if(rareSel.value!=='all'){url.searchParams.set('rare',rareSel.value);parts.push(tr[lang].rarities[rareSel.value]||rareSel.value);}
-    if(tagSel.value!=='all'){url.searchParams.set('tag',tagSel.value);parts.push(tagSel.value);}
+    if(searchEl.value.trim()){parts.push(searchEl.value.trim());}
+    if(typeSel.value!=='all'){parts.push(tr[lang].types[typeSel.value]||typeSel.value);}
+    if(rareSel.value!=='all'){parts.push(tr[lang].rarities[rareSel.value]||rareSel.value);}
+    if(tagSel.value!=='all'){parts.push(tagSel.value);}
     const name=parts.length?parts.join(' '):(lang==='vi'?'Tất cả mục':'All Items');
     const txt=`${name}\n${tr[lang].shareSearchText}`;
-    if(navigator.share){ navigator.share({text:txt,url:url.toString()}); }
+    if(navigator.share){ navigator.share({text:txt,url}); }
     else { navigator.clipboard.writeText(`${txt}\n${url}`).then(()=>alert(lang==='en'?'Link copied!':lang==='vi'?'Đã sao chép!':'已複製!')); }
   });
 
   function checkUrlParams(){
     const p=new URLSearchParams(window.location.search);
-    const si=p.get('item'),ss=p.get('search'),stag=p.get('tag'),stype=p.get('type'),srare=p.get('rare');
+    const ss=p.get('search'),stag=p.get('tag'),stype=p.get('type'),srare=p.get('rare');
     if(ss) searchEl.value=ss;
     if(stag&&[...tagSel.options].some(o=>o.value===stag)) tagSel.value=stag;
     if(stype&&[...typeSel.options].some(o=>o.value===stype)) typeSel.value=stype;
     if(srare&&[...rareSel.options].some(o=>o.value===srare)) rareSel.value=srare;
+    const si = routeItemId || p.get('item');
     if(si){
       const idx = window._itemsById ? window._itemsById.get(si) : items.findIndex(x=>x.Id.toString()===si);
-      if(idx !== undefined && idx !== -1) openModal(idx);
+      if(idx !== undefined && idx !== -1) openModal(idx, false);
     }
   }
 
