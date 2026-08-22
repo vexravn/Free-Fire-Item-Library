@@ -9,12 +9,12 @@ Thư viện web toàn diện để khám phá và duyệt tất cả vật phẩ
 - **Duyệt 25.000+ vật phẩm** với icon đầy đủ, background độ hiếm
 - **Tìm kiếm nhanh** theo tên, Icon ID hoặc Item ID
 - **Lọc đa chiều** theo OB (Tag), Loại vật phẩm, Độ hiếm
-- **Đa ngôn ngữ** — Tiếng Việt & English
+- **Đa ngôn ngữ** — Tiếng Việt, Tiếng Trung & English
 - **Chia sẻ vật phẩm** qua link `?item=ID`
 - **Tải icon** — tải riêng lẻ hoặc theo batch, có/không có nền độ hiếm
 - **Developer Mode** — chọn nhiều vật phẩm, sao chép ID hàng loạt
 - **PWA Ready** — cài đặt như ứng dụng trên điện thoại
-- **Tự động đồng bộ** dữ liệu và icon mỗi 12 tiếng qua GitHub Actions
+- **Tự động đồng bộ** dữ liệu và icon mỗi 1 tiếng qua GitHub Actions
 
 ---
 
@@ -31,14 +31,14 @@ Thư viện web toàn diện để khám phá và duyệt tất cả vật phẩ
 ├── background/             # Ảnh nền theo độ hiếm
 └── .github/workflows/
     ├── update-icons.yml    # Tải icon khi data thay đổi
-    └── sync-data.yml       # Đồng bộ data từ nguồn mỗi 12h
+    └── sync-data.yml       # Đồng bộ data từ nguồn mỗi 1h
 ```
 
 ---
 
 ## ⚙️ Tự Động Hóa (GitHub Actions)
 
-### `sync-data.yml` — Chạy mỗi 12 tiếng
+### `sync-data.yml` — Chạy mỗi 1 tiếng
 Tự động kéo dữ liệu mới nhất từ [Free-Fire-Item-Library](https://github.com/KingofGames02/Free-Fire-Items-Library) về repo này:
 - Cập nhật `ItemsData_en.json`, `CollectionBanner.json`, `ignore_list.json`
 - Chạy `fetch-icons.js` để tải icon mới
@@ -52,7 +52,7 @@ Kích hoạt khi `ItemsData_en.json`, `CollectionBanner.json` hoặc `ignore_lis
 
 ---
 
-## � Chạy Cục Bộ
+## 🧪 Chạy Cục Bộ
 
 Không cần build tool hay server. Chỉ cần mở `index.html` trong trình duyệt hoặc dùng Live Server:
 
@@ -63,7 +63,43 @@ npx serve .
 
 ---
 
-## 🎨 Độ Hiếm Vật Phẩm
+## 🚀 Dịch Tự Động Liên Tục (Watch Mode)
+
+Để tránh chậm trễ dữ liệu, bạn có thể chạy script dịch theo thời gian thực:
+
+```bash
+# Chạy 1 lần (chỉ dịch thay đổi)
+node translate-data.js
+
+# Chạy liên tục: tự động dịch khi ItemsData_en.json thay đổi
+node translate-data.js --watch
+```
+
+Giữ process chạy liên tục bằng `pm2`:
+
+```bash
+npm install -g pm2
+pm2 start translate-data.js --name translate -- --watch
+pm2 save
+pm2 startup
+```
+
+### Tốc Độ Dịch
+
+| Chế độ | Độ trễ | Ghi chú |
+|--------|--------|---------|
+| GitHub Actions | **~1 giờ** | Tự chạy mỗi 1h, phù hợp CI miễn phí |
+| `--watch` local/VPS | **~2 giây** | Phát hiện thay đổi file EN và dịch ngay |
+| `--force` | **~70 phút** | Dịch lại toàn bộ ~34k items (chạy 1 lần) |
+
+> **Lưu ý quan trọng:** GitHub Actions miễn phí **không thể chạy liên tục 24/7**.
+> Nếu bạn cần VN/ZH bắt kịp EN gần như tức thì, hãy dùng `--watch` trên VPS/máy local.
+> Chế độ `--watch` chỉ dịch lại phần thay đổi, nên cực nhanh khi EN cập nhật nhỏ.
+
+
+---
+
+
 
 | Độ hiếm | Màu |
 |---|---|

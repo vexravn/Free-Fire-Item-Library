@@ -1,269 +1,260 @@
 /**
  * translate-data.js
  * Tự động dịch ItemsData_en.json → ItemsData_vn.json & ItemsData_zh.json
- * Sử dụng Google Translate miễn phí (không cần API key)
- * Chỉ dịch các item có Name/Desc chưa được dịch hoặc mới thêm vào
+ *
+ * Cách hoạt động:
+ * - Mỗi item trong VN/ZH lưu thêm _enName và _enDesc (nguồn EN tại thời điểm dịch)
+ * - Mỗi lần chạy, so sánh EN hiện tại với _enName/_enDesc đã lưu:
+ *   + Nếu khác → dịch lại phần thay đổi
+ *   + Nếu giống  → giữ nguyên bản dịch cũ
+ * - Chạy node translate-data.js --force để dịch lại TOÀN BỘ (khi cần)
+ * - Chạy node translate-data.js --watch để theo dõi file EN và tự động dịch khi có thay đổi
+ *
+ * - Dịch song song (concurrent) để tối ưu tốc độ
+ * - Retry tự động khi bị rate limit
+ * - Luôn copy Type, CollectionType, Icon, Rare, IsUnique, IconInAB, Category, Tag từ EN
  */
 
-const fs = require('fs');
+const fs   = require('fs');
 const path = require('path');
 const https = require('https');
 
-// ──────────────────────────────────────────────
-// Config
-// ──────────────────────────────────────────────
-const EN_FILE  = path.join(__dirname, 'ItemsData_en.json');
-const VN_FILE  = path.join(__dirname, 'ItemsData_vn.json');
-const ZH_FILE  = path.join(__dirname, 'ItemsData_zh.json');
+// ── Config ──────────────────────────────────────
+const EN_FILE   = path.join(__dirname, 'ItemsData_en.json');
+const VN_FILE   = path.join(__dirname, 'ItemsData_vn.json');
+const ZH_FILE   = path.join(__dirname, 'ItemsData_zh.json');
 
-const BATCH_SIZE   = 50;   // Số item dịch mỗi batch (tránh rate limit)
-const DELAY_MS     = 800;  // Delay giữa các request (ms)
-const MAX_RETRIES  = 3;    // Số lần retry khi lỗi
+const CONCURRENCY = 8;
+const RETRY_MAX   = 4;
+const RETRY_BASE  = 600;
+// ────────────────────────────────────────────────
 
-// ──────────────────────────────────────────────
-// Hàm sleep
-// ──────────────────────────────────────────────
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-// ──────────────────────────────────────────────
-// Google Translate (unofficial, miễn phí)
-// ──────────────────────────────────────────────
+// ── Google Translate (unofficial, miễn phí) ─────
 function translateText(text, targetLang) {
   return new Promise((resolve, reject) => {
-    if (!text || !text.trim()) {
-      resolve('');
-      return;
-    }
+    if (!text || !text.trim()) { resolve(''); return; }
 
-    const encodedText = encodeURIComponent(text);
-    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=${targetLang}&dt=t&q=${encodedText}`;
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=${
+      encodeURIComponent(targetLang)}&dt=t&q=${encodeURIComponent(text)}`;
 
-    const req = https.get(url, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
+    const req = https.get(url, res => {
+      let raw = '';
+      res.on('data', c => raw += c);
       res.on('end', () => {
         try {
-          const parsed = JSON.parse(data);
-          // Ghép tất cả đoạn dịch lại
-          let translated = '';
-          if (parsed && parsed[0]) {
-            for (const segment of parsed[0]) {
-              if (segment && segment[0]) translated += segment[0];
-            }
-          }
-          resolve(translated || text);
-        } catch (e) {
-          reject(new Error(`Parse error: ${e.message}`));
-        }
+          const parsed = JSON.parse(raw);
+          let out = '';
+          if (parsed?.[0]) for (const seg of parsed[0]) if (seg?.[0]) out += seg[0];
+          resolve(out || text);
+        } catch { reject(new Error('parse_error')); }
       });
     });
-
     req.on('error', reject);
-    req.setTimeout(15000, () => {
-      req.destroy();
-      reject(new Error('Request timeout'));
-    });
+    req.setTimeout(12000, () => { req.destroy(); reject(new Error('timeout')); });
   });
 }
 
-// Retry wrapper
-async function translateWithRetry(text, targetLang, retries = MAX_RETRIES) {
-  for (let i = 0; i < retries; i++) {
+async function translate(text, lang) {
+  for (let i = 0; i < RETRY_MAX; i++) {
     try {
-      const result = await translateText(text, targetLang);
-      return result;
-    } catch (err) {
-      console.warn(`  ⚠ Retry ${i + 1}/${retries} cho lang=${targetLang}: ${err.message}`);
-      if (i < retries - 1) await sleep(DELAY_MS * (i + 1));
+      return await translateText(text, lang);
+    } catch (e) {
+      if (i < RETRY_MAX - 1) await sleep(RETRY_BASE * Math.pow(2, i));
     }
   }
-  return text; // Fallback: trả về text gốc nếu dịch thất bại
+  return text;
 }
 
-// ──────────────────────────────────────────────
-// Dịch một item
-// ──────────────────────────────────────────────
-async function translateItem(enItem, existingItem, targetLang) {
-  // Giữ nguyên các field không cần dịch
-  const result = {
-    Id:             enItem.Id,
-    Type:           enItem.Type,
-    CollectionType: enItem.CollectionType,
-    Name:           existingItem?.Name ?? '',
-    Desc:           existingItem?.Desc ?? '',
-    Icon:           enItem.Icon,
-    Rare:           enItem.Rare,
-    IsUnique:       enItem.IsUnique,
-    IconInAB:       enItem.IconInAB,
-    Category:       enItem.Category,
-    Tag:            enItem.Tag,
-  };
+// ── Chạy N tác vụ song song với giới hạn concurrency ──
+async function pool(tasks, concurrency) {
+  const results = new Array(tasks.length);
+  let idx = 0;
 
-  const enName = enItem.Name?.trim() || '';
-  const enDesc = enItem.Desc?.trim() || '';
-  const exName = existingItem?.Name?.trim() || '';
-  const exDesc = existingItem?.Desc?.trim() || '';
-
-  // Chỉ dịch nếu: item mới (không tồn tại) HOẶC bản dịch còn trống khi EN có nội dung
-  const needTranslateName = enName && !exName;
-  const needTranslateDesc = enDesc && !exDesc;
-
-  if (needTranslateName) {
-    result.Name = await translateWithRetry(enName, targetLang);
-    await sleep(200);
+  async function worker() {
+    while (idx < tasks.length) {
+      const i = idx++;
+      results[i] = await tasks[i]();
+    }
   }
 
-  if (needTranslateDesc) {
-    result.Desc = await translateWithRetry(enDesc, targetLang);
-    await sleep(200);
-  }
-
-  return result;
+  await Promise.all(Array.from({ length: concurrency }, worker));
+  return results;
 }
 
-// ──────────────────────────────────────────────
-// Xử lý một ngôn ngữ
-// ──────────────────────────────────────────────
-async function processLanguage(enData, existingData, targetLang, outputFile, langLabel) {
-  console.log(`\n🌐 Đang xử lý: ${langLabel} (${targetLang})`);
+// ── Xử lý một ngôn ngữ ──────────────────────────
+async function processLanguage(enData, existingData, targetLang, outputFile, label, force = false) {
+  console.log(`\n🌐 ${label} (${targetLang})`);
 
-  // Map existing data theo Id để tra cứu nhanh
-  const existingMap = new Map();
-  for (const item of existingData) {
-    existingMap.set(item.Id, item);
+  const existingMap = new Map(existingData.map(i => [i.Id, i]));
+
+  // Phát hiện file cũ chưa có _enName/_enDesc
+  const hasSourceTracking = existingData.some(item => '_enName' in item);
+  if (!hasSourceTracking && existingData.length > 0 && !force) {
+    console.log('   ⚠️  File cũ không có _enName/_enDesc, không thể phát hiện thay đổi.');
+    console.log('   💡 Chạy với --force để dịch lại toàn bộ.');
+    return { total: enData.length, translated: 0, unchanged: enData.length };
   }
 
-  const result = [];
-  let translated = 0;
-  let skipped    = 0;
-  let newItems   = 0;
+  const toProcess = [];
 
-  for (let i = 0; i < enData.length; i += BATCH_SIZE) {
-    const batch = enData.slice(i, i + BATCH_SIZE);
-    const batchNum = Math.floor(i / BATCH_SIZE) + 1;
-    const totalBatches = Math.ceil(enData.length / BATCH_SIZE);
-    console.log(`  📦 Batch ${batchNum}/${totalBatches} (items ${i + 1}–${Math.min(i + BATCH_SIZE, enData.length)})`);
-
-    for (const enItem of batch) {
-      const existing = existingMap.get(enItem.Id);
-      const isNew = !existing;
-
-      if (isNew) newItems++;
-
-      const enName = enItem.Name?.trim() || '';
-      const enDesc = enItem.Desc?.trim() || '';
-      const exName = existing?.Name?.trim() || '';
-      const exDesc = existing?.Desc?.trim() || '';
-
-      const needsWork = (enName && !exName) || (enDesc && !exDesc);
-
-      if (needsWork) {
-        translated++;
-        const translatedItem = await translateItem(enItem, existing, targetLang);
-        result.push(translatedItem);
-      } else {
-        skipped++;
-        // Giữ item existing nhưng sync lại các field không dịch (Icon, Rare, Category, Tag...)
-        result.push({
-          Id:             enItem.Id,
-          Type:           enItem.Type,
-          CollectionType: enItem.CollectionType,
-          Name:           existing?.Name ?? '',
-          Desc:           existing?.Desc ?? '',
-          Icon:           enItem.Icon,
-          Rare:           enItem.Rare,
-          IsUnique:       enItem.IsUnique,
-          IconInAB:       enItem.IconInAB,
-          Category:       enItem.Category,
-          Tag:            enItem.Tag,
-        });
+  for (const en of enData) {
+    const ex = existingMap.get(en.Id);
+    if (!ex) {
+      toProcess.push({ en, ex: null, needName: true, needDesc: true, isNew: true });
+    } else if (force) {
+      const needName = !!en.Name?.trim();
+      const needDesc = !!en.Desc?.trim();
+      toProcess.push({ en, ex, needName, needDesc, isNew: false });
+    } else {
+      const sourceName = ex._enName ?? en.Name;
+      const sourceDesc = ex._enDesc ?? en.Desc;
+      const nameChanged = en.Name !== sourceName;
+      const descChanged = en.Desc !== sourceDesc;
+      if (nameChanged || descChanged) {
+        toProcess.push({ en, ex, needName: nameChanged, needDesc: descChanged, isNew: false });
       }
     }
-
-    // Delay giữa các batch
-    if (i + BATCH_SIZE < enData.length) {
-      await sleep(DELAY_MS);
-    }
   }
 
-  // Ghi file
-  fs.writeFileSync(outputFile, JSON.stringify(result, null, 4), 'utf-8');
+  const toTranslate = toProcess.filter(t => t.needName || t.needDesc);
+  const newItems = toProcess.filter(t => t.isNew).length;
+  const updatedItems = toProcess.filter(t => !t.isNew).length;
+  const unchanged = enData.length - toProcess.length;
 
-  console.log(`  ✅ Hoàn thành ${langLabel}:`);
-  console.log(`     - Tổng item : ${result.length}`);
-  console.log(`     - Mới thêm  : ${newItems}`);
-  console.log(`     - Đã dịch   : ${translated}`);
-  console.log(`     - Bỏ qua    : ${skipped}`);
-  console.log(`     - Lưu vào   : ${outputFile}`);
+  console.log(`   Mới: ${newItems} | Cập nhật: ${updatedItems} | Giữ nguyên: ${unchchanged}`);
 
-  return { total: result.length, newItems, translated, skipped };
+  // Dịch
+  let done = 0;
+  const translated = new Map();
+
+  const tasks = toTranslate.map(({ en, ex, needName, needDesc }) => async () => {
+    const result = { Name: ex?.Name ?? '', Desc: ex?.Desc ?? '' };
+
+    if (needName)  result.Name = await translate(en.Name, targetLang);
+    if (needDesc)  result.Desc = await translate(en.Desc, targetLang);
+
+    translated.set(en.Id, result);
+    done++;
+    if (done % 50 === 0 || done === toTranslate.length) {
+      process.stdout.write(`\r   Đã dịch: ${done}/${toTranslate.length}`);
+    }
+  });
+
+  if (tasks.length > 0) {
+    await pool(tasks, CONCURRENCY);
+    console.log('');
+  }
+
+  // Ghép kết quả theo thứ tự EN
+  const result = enData.map(en => {
+    const ex  = existingMap.get(en.Id);
+    const tr  = translated.get(en.Id);
+    return {
+      Id:             en.Id,
+      Type:           en.Type,
+      CollectionType: en.CollectionType,
+      Name:           tr?.Name  ?? ex?.Name  ?? '',
+      Desc:           tr?.Desc  ?? ex?.Desc  ?? '',
+      Icon:           en.Icon,
+      Rare:           en.Rare,
+      IsUnique:       en.IsUnique,
+      IconInAB:       en.IconInAB,
+      Category:       en.Category ?? '',
+      Tag:            en.Tag      ?? '',
+      _enName:        en.Name,
+      _enDesc:        en.Desc,
+    };
+  });
+
+  fs.writeFileSync(outputFile, JSON.stringify(result, null, 2), 'utf-8');
+  console.log(`   ✅ Ghi ${result.length} items → ${path.basename(outputFile)}`);
+  return { total: result.length, translated: toTranslate.length, unchanged };
 }
 
-// ──────────────────────────────────────────────
-// Main
-// ──────────────────────────────────────────────
-async function main() {
-  console.log('🚀 Bắt đầu dịch dữ liệu vật phẩm...\n');
+// ── Watch Mode ──────────────────────────────────
+async function watchMode() {
+  console.log('👁️  Watch mode: theo dõi ItemsData_en.json...');
 
-  // Đọc dữ liệu nguồn
+  const run = async () => {
+    try {
+      if (!fs.existsSync(EN_FILE)) {
+        console.log('   ⏳ Chờ file EN xuất hiện...');
+        return;
+      }
+
+      const enData = JSON.parse(fs.readFileSync(EN_FILE, 'utf-8'));
+      const vnData = fs.existsSync(VN_FILE) ? JSON.parse(fs.readFileSync(VN_FILE, 'utf-8')) : [];
+      const zhData = fs.existsSync(ZH_FILE) ? JSON.parse(fs.readFileSync(ZH_FILE, 'utf-8')) : [];
+
+      console.log(`\n📂 EN: ${enData.length} | VN: ${vnData.length} | ZH: ${zhData.length}`);
+
+      const t0 = Date.now();
+
+      const [vnStats, zhStats] = await Promise.all([
+        processLanguage(enData, vnData, 'vi',    VN_FILE, 'Tiếng Việt'),
+        processLanguage(enData, zhData, 'zh-TW', ZH_FILE, 'Tiếng Trung'),
+      ]);
+
+      const sec = ((Date.now() - t0) / 1000).toFixed(1);
+      console.log(`\n✅ Hoàn thành trong ${sec}s`);
+      console.log(`   VN: ${vnStats.translated} dịch, ${vnStats.unchanged} giữ nguyên`);
+      console.log(`   ZH: ${zhStats.translated} dịch, ${zhStats.unchanged} giữ nguyên`);
+    } catch (e) {
+      console.error('❌ Lỗi:', e.message);
+    }
+  };
+
+  // Chạy lần đầu
+  await run();
+
+  // Theo dõi file EN
+  fs.watch(EN_FILE, { persistent: true }, async (eventType) => {
+    if (eventType === 'change') {
+      console.log('\n🔄 Phát hiện thay đổi ItemsData_en.json, chờ 2s để ghi hoàn tất...');
+      await sleep(2000);
+      await run();
+    }
+  });
+
+  console.log('👁️  Đang theo dõi... (Ctrl+C để dừng)');
+}
+
+// ── Main ─────────────────────────────────────────
+async function main() {
+  const watch = process.argv.includes('--watch');
+  const force = process.argv.includes('--force');
+
+  if (watch) {
+    await watchMode();
+    return;
+  }
+
+  console.log('🚀 translate-data.js bắt đầu\n');
+
   if (!fs.existsSync(EN_FILE)) {
-    console.error(`❌ Không tìm thấy file: ${EN_FILE}`);
-    process.exit(1);
+    console.error('❌ Không tìm thấy ItemsData_en.json'); process.exit(1);
   }
 
   const enData = JSON.parse(fs.readFileSync(EN_FILE, 'utf-8'));
-  console.log(`📂 Đọc ${enData.length} items từ ItemsData_en.json`);
-
-  // Đọc dữ liệu dịch hiện có (nếu có)
   const vnData = fs.existsSync(VN_FILE) ? JSON.parse(fs.readFileSync(VN_FILE, 'utf-8')) : [];
   const zhData = fs.existsSync(ZH_FILE) ? JSON.parse(fs.readFileSync(ZH_FILE, 'utf-8')) : [];
 
-  console.log(`📂 VN hiện có: ${vnData.length} items`);
-  console.log(`📂 ZH hiện có: ${zhData.length} items`);
+  console.log(`📂 EN: ${enData.length} | VN: ${vnData.length} | ZH: ${zhData.length}`);
+  if (force) console.log('⚠️  Chế độ --force: dịch lại TOÀN BỘ');
 
-  // Kiểm tra có gì cần dịch không
-  const vnMap = new Map(vnData.map(i => [i.Id, i]));
-  const zhMap = new Map(zhData.map(i => [i.Id, i]));
+  const t0 = Date.now();
 
-  const vnNeeds = enData.filter(e => {
-    const ex = vnMap.get(e.Id);
-    return (e.Name?.trim() && !ex?.Name?.trim()) || (e.Desc?.trim() && !ex?.Desc?.trim());
-  }).length;
+  const [vnStats, zhStats] = await Promise.all([
+    processLanguage(enData, vnData, 'vi',    VN_FILE, 'Tiếng Việt', force),
+    processLanguage(enData, zhData, 'zh-TW', ZH_FILE, 'Tiếng Trung', force),
+  ]);
 
-  const zhNeeds = enData.filter(e => {
-    const ex = zhMap.get(e.Id);
-    return (e.Name?.trim() && !ex?.Name?.trim()) || (e.Desc?.trim() && !ex?.Desc?.trim());
-  }).length;
-
-  console.log(`\n📊 Cần dịch: VN=${vnNeeds} items | ZH=${zhNeeds} items`);
-
-  if (vnNeeds === 0 && zhNeeds === 0 && vnData.length === enData.length && zhData.length === enData.length) {
-    console.log('\n✨ Tất cả dữ liệu đã được dịch và đồng bộ. Không cần làm gì thêm.');
-    // Vẫn sync lại để đảm bảo Category/Tag được cập nhật
-  }
-
-  const startTime = Date.now();
-
-  // Xử lý VN
-  const vnStats = await processLanguage(enData, vnData, 'vi', VN_FILE, 'Tiếng Việt');
-
-  // Delay giữa 2 ngôn ngữ
-  await sleep(1500);
-
-  // Xử lý ZH
-  const zhStats = await processLanguage(enData, zhData, 'zh-TW', ZH_FILE, 'Tiếng Trung (Traditional)');
-
-  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-
-  console.log('\n═══════════════════════════════════════');
-  console.log('✅ HOÀN THÀNH DỊCH DỮ LIỆU');
-  console.log(`   Thời gian: ${elapsed}s`);
-  console.log(`   VN: ${vnStats.translated} dịch mới, ${vnStats.skipped} bỏ qua`);
-  console.log(`   ZH: ${zhStats.translated} dịch mới, ${zhStats.skipped} bỏ qua`);
-  console.log('═══════════════════════════════════════\n');
+  const sec = ((Date.now() - t0) / 1000).toFixed(1);
+  console.log(`\n✅ Hoàn thành trong ${sec}s`);
+  console.log(`   VN: ${vnStats.translated} dịch, ${vnStats.unchchanged} giữ nguyên`);
+  console.log(`   ZH: ${zhStats.translated} dịch, ${zhStats.unchchanged} giữ nguyên`);
 }
 
-main().catch(err => {
-  console.error('❌ Lỗi:', err);
-  process.exit(1);
-});
+main().catch(e => { console.error('❌', e.message); process.exit(1); });

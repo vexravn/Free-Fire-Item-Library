@@ -2,7 +2,7 @@ name: Sync Data & Fetch Icons
 
 on:
   schedule:
-    - cron: '0 */12 * * *'   # Tự chạy mỗi 12 tiếng 1 lần (00:00 và 12:00 UTC)
+    - cron: '0 */1 * * *'   # Tự chạy mỗi 1 tiếng 1 lần để giảm chậm trễ
   workflow_dispatch:           # Cho phép chạy thủ công trên GitHub Actions
 
 jobs:
@@ -44,5 +44,5 @@ jobs:
       - name: Commit và push nếu có thay đổi
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "Auto-synced data & icons [12h]"
+          commit_message: "Auto-synced data & icons [1h]"
           file_pattern: 'ItemsData_en.json ItemsData_vn.json ItemsData_zh.json CollectionBanner.json ignore_list.json icons/ updated_icons.json'
